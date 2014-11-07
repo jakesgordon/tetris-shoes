@@ -205,7 +205,7 @@ class Tetris
   end
 
   def increase_pace(multiplier)
-    # @pace = [pace - multiplier*SPEED[:decrement], SPEED[:min]].max
+    @pace = [pace - multiplier*PACE[:decrement], PACE[:min]].max
   end
 
   def lost?
