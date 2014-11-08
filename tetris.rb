@@ -1,21 +1,21 @@
 require 'shoes'
 
-#===============
+#==================================================================================================
 # Game Constants
-#===============
+#==================================================================================================
 
-WIDTH  = 300            # width of tetris court (in pixels)
+WIDTH  = 300            # width  of tetris court (in pixels)
 HEIGHT = 600            # height of tetris court (in pixels)
-NX     = 10             # width of tetris court (in blocks)
+NX     = 10             # width  of tetris court (in blocks)
 NY     = 20             # height of tetris court (in blocks)
-DX     = WIDTH / NX     # pixel width of a single tetris block
+DX     = WIDTH / NX     # pixel width  of a single tetris block
 DY     = HEIGHT / NY    # pixel height of a single tetris block
-FPS    = 60
-PACE   = { :start => 0.5, :decrement => 0.005, :min => 0.1 } # how long before a piece drops by 1 row (seconds)
+FPS    = 60             # game animation frame rate (fps)
+PACE   = { :start => 0.5, :step => 0.005, :min => 0.1 } # how long before a piece drops by 1 row (seconds)
 
-#==============
-# Tetris Pieces
-#==============
+#==================================================================================================
+# The 7 Tetromino Types
+#==================================================================================================
 #
 # blocks: each element represents a rotation of the piece (0, 90, 180, 270)
 #         each element is a 16 bit integer where the 16 bits represent
@@ -28,106 +28,70 @@ PACE   = { :start => 0.5, :decrement => 0.005, :min => 0.1 } # how long before a
 #                               ------
 #                               0x44C0
 #
+#  (see http://codeincomplete.com/posts/2011/10/10/javascript_tetris/)
+#
 
-I = { size: 4, blocks: {:up => 0x0F00, :right => 0x2222, :down => 0x00F0, :left => 0x4444}, color: '#00FFFF' };
-J = { size: 3, blocks: {:up => 0x44C0, :right => 0x8E00, :down => 0x6440, :left => 0x0E20}, color: '#0000FF' };
-L = { size: 3, blocks: {:up => 0x4460, :right => 0x0E80, :down => 0xC440, :left => 0x2E00}, color: '#FF8000' };
-O = { size: 2, blocks: {:up => 0xCC00, :right => 0xCC00, :down => 0xCC00, :left => 0xCC00}, color: '#FFFF00' };
-S = { size: 3, blocks: {:up => 0x06C0, :right => 0x8C40, :down => 0x6C00, :left => 0x4620}, color: '#00FF00' };
-T = { size: 3, blocks: {:up => 0x0E40, :right => 0x4C40, :down => 0x4E00, :left => 0x4640}, color: '#8040FF' };
-Z = { size: 3, blocks: {:up => 0x0C60, :right => 0x4C80, :down => 0xC600, :left => 0x2640}, color: '#FF0000' };
+I = { blocks: {:up => 0x0F00, :right => 0x2222, :down => 0x00F0, :left => 0x4444}, color: '#00FFFF', size: 4 };
+J = { blocks: {:up => 0x44C0, :right => 0x8E00, :down => 0x6440, :left => 0x0E20}, color: '#0000FF', size: 3 };
+L = { blocks: {:up => 0x4460, :right => 0x0E80, :down => 0xC440, :left => 0x2E00}, color: '#FF8000', size: 3 };
+O = { blocks: {:up => 0xCC00, :right => 0xCC00, :down => 0xCC00, :left => 0xCC00}, color: '#FFFF00', size: 2 };
+S = { blocks: {:up => 0x06C0, :right => 0x8C40, :down => 0x6C00, :left => 0x4620}, color: '#00FF00', size: 3 };
+T = { blocks: {:up => 0x0E40, :right => 0x4C40, :down => 0x4E00, :left => 0x4640}, color: '#8040FF', size: 3 };
+Z = { blocks: {:up => 0x0C60, :right => 0x4C80, :down => 0xC600, :left => 0x2640}, color: '#FF0000', size: 3 };
 
-#============
-# Game Runner
-#============
+#==================================================================================================
+# The Game Runner
+#==================================================================================================
+
 class Tetris
 
-  class Piece
+  attr :dt,       # time since the current active piece last dropped a row
+       :score,    # the current score
+       :lost,     # bool to indicate when the game is lost
+       :pace,     # current game pace - how long until the current piece drops a single row
+       :blocks,   # 2 dimensional array (NX*NY) represeting the tetris court - either empty block or occupied by a piece
+       :actions,  # queue of user inputs collected by the game loop
+       :bag,      # a collection of random pieces to be used
+       :current   # the current active piece
 
-    attr :type, :dir, :x, :y
-
-    def initialize(type, x = nil, y = nil, dir = nil)
-      @type = type
-      @dir  = dir || :up
-      @x    = x   || rand(NX - type[:size])
-      @y    = y   || 0
-    end
-
-    def rotate
-      newdir = case dir
-               when :left  then :up
-               when :up    then :right
-               when :right then :down
-               when :down  then :left
-               end
-      Piece.new(type, x, y, newdir)
-    end
-
-    def move(dir)
-      case dir
-      when :right then Piece.new(type, x + 1, y,     @dir)
-      when :left  then Piece.new(type, x - 1, y,     @dir)
-      when :down  then Piece.new(type, x,     y + 1, @dir)
-      end
-    end
-
-    def each_occupied_block
-      bit = 0b1000000000000000
-      row = 0
-      col = 0
-      blocks = type[:blocks][dir]
-      until bit.zero?
-        if (blocks & bit) == bit
-          yield x+col, y+row
-        end
-        col = col + 1
-        if col == 4
-          col = 0
-          row = row + 1
-        end
-        bit = bit >> 1
-      end
-    end
-
-  end
-
-  attr :dt, :score, :vscore, :lost, :pace, :blocks, :actions, :bag, :current
+  #----------------------------------------------------------------------------
 
   def initialize
-    @dt      = 0                 # time since game started
-    @score   = 0                 # the current score
-    @vscore  = 0                 # the rendered score (make it play catch-up like a slot machine)
-    @pace    = PACE[:start]      # how long before the current piece drops by 1 row
-    @blocks  = Array.new(NX){[]} # 2 dimensional array (NX * NY) representing tetris court - either empty block or occupied by a 'piece'
-    @actions = []                # queue of user inputs
-    @bag     = [];               # a collection of random pieces to be used
-    @current = random_piece      # the current piece
+    @dt      = 0
+    @score   = 0
+    @pace    = PACE[:start]
+    @blocks  = Array.new(NX) { Array.new(NY) }   # akward way to initialize an already sized 2 dimensional array
+    @actions = []
+    @bag     = new_bag
+    @current = random_piece
   end
 
+  #----------------------------------------------------------------------------
+
   def update(seconds)
-    handle(actions.shift)
+
+    action = actions.shift
+    case action
+    when :left   then move(:left)
+    when :right  then move(:right)
+    when :rotate then rotate
+    when :drop   then drop
+    end
+
     @dt += seconds
     if dt > pace
       @dt = dt - pace
       drop
     end
-    update_score
+
   end
 
-  def drop
-    if !move(:down)
-      add_score(10)
-      drop_piece
-      remove_lines
-      actions.clear
-      lose if occupied(current)
-    end
-  end
+  #----------------------------------------------------------------------------
 
   def move(dir)
     nextup = current.move(dir)
     if unoccupied(nextup)
-      @current = nextup
+      choose_new_piece(nextup)
       true
     end
   end
@@ -135,46 +99,88 @@ class Tetris
   def rotate
     nextup = current.rotate
     if unoccupied(nextup)
-      @current = nextup
+      choose_new_piece(nextup)
       true
     end
   end
+
+  def drop
+    if !move(:down)
+      finalize_piece
+      reward_for_piece
+      remove_any_completed_lines
+      clear_pending_actions
+      choose_new_piece
+      lose if occupied(current)
+    end
+  end
+
+  #----------------------------------------------------------------------------
 
   def unoccupied(piece)
     !occupied(piece)
   end
 
   def occupied(piece)
-    result = false
     piece.each_occupied_block do |x,y|
       if ((x < 0) || (x >= NX) || (y < 0) || (y >= NY) || blocks[x][y])
-        result = true
+        return true
       end
     end
-    result
+    false
   end
 
-  def drop_piece
-    current.each_occupied_block { |x,y| blocks[x][y] = current.type }
-    @current = random_piece
+  #----------------------------------------------------------------------------
+
+  def finalize_piece
+    current.each_occupied_block { |x,y| blocks[x][y] = current.tetromino }
   end
 
-  def remove_lines
-    lines_removed = 0
+  def choose_new_piece(piece = nil)
+    @current = piece || random_piece
+  end
+
+  def reward_for_piece
+    @score = score + 10
+  end
+  
+  def reward_lines(lines)
+    @score = score + (100 * 2**(lines-1))   # e.g. 1: 100, 2: 200, 3: 400, 4: 800
+    @pace  = [pace - lines*PACE[:step], PACE[:min]].max
+  end
+
+  def clear_pending_actions
+    actions.clear
+  end
+
+  def lose
+    @lost = true
+  end
+
+  def lost?
+    !!@lost
+  end
+
+  def new_bag
+    [I,I,I,I,J,J,J,J,L,L,L,L,O,O,O,O,S,S,S,S,T,T,T,T,Z,Z,Z,Z].shuffle
+  end
+    
+  def random_piece
+    @bag = new_bag if bag.empty?
+    Piece.new(bag.pop)
+  end
+
+  #----------------------------------------------------------------------------
+
+  def remove_any_completed_lines
+    lines = 0
     NY.times do |y|
-      complete = true
-      NX.times do |x|
-        complete = false if blocks[x][y].nil?
-      end
-      if complete
+      unless NX.times.any?{|x| blocks[x][y].nil? }
         remove_line(y)
-        lines_removed += 1
+        lines += 1
       end
     end
-    if lines_removed > 0
-      add_score(100 * 2**(lines_removed-1))  # 1: 100, 2: 200, 3: 400, 4: 800, etc
-      increase_pace(lines_removed)
-    end
+    reward_lines(lines) unless lines.zero?
   end
 
   def remove_line(n)
@@ -185,48 +191,7 @@ class Tetris
     end
   end
 
-  def add_score(n)
-    @score += n
-  end
-
-  def update_score
-    catchup = score - vscore
-    @vscore += case
-               when catchup > 100 then 10
-               when catchup > 50  then 5
-               when catchup > 0   then 1
-               else
-                 0
-               end
-  end
-
-  def lose
-    @lost = true
-  end
-
-  def increase_pace(multiplier)
-    @pace = [pace - multiplier*PACE[:decrement], PACE[:min]].max
-  end
-
-  def lost?
-    !!@lost
-  end
-
-  def handle(action)
-    case action
-    when :left   then move(:left)
-    when :right  then move(:right)
-    when :rotate then rotate
-    when :drop   then drop
-    end
-  end
-
-  def random_piece
-    if bag.empty?
-      bag = [I,I,I,I,J,J,J,J,L,L,L,L,O,O,O,O,S,S,S,S,T,T,T,T,Z,Z,Z,Z].shuffle
-    end
-    Piece.new(bag.pop)
-  end
+  #----------------------------------------------------------------------------
 
   def each_occupied_block
     NY.times do |y|
@@ -238,9 +203,74 @@ class Tetris
     end
   end
 
-end
+end # class Tetris
 
-shoes = Shoes.app :title => 'Tetris', :width => WIDTH, :height => HEIGHT do
+#==================================================================================================
+# A Game Piece
+#==================================================================================================
+
+class Piece
+
+  attr :tetromino,  # the tetromino type
+       :dir,        # the rotation direction (:up, :down, :left, :right)
+       :x, :y       # the (x,y) position on the board
+
+  #----------------------------------------------------------------------------
+
+  def initialize(tetromino, x = nil, y = nil, dir = nil)
+    @tetromino = tetromino
+    @dir       = dir || :up
+    @x         = x   || rand(NX - tetromino[:size])   # default to a random horizontal position (that fits)
+    @y         = y   || 0
+  end
+
+  #----------------------------------------------------------------------------
+
+  def rotate
+    newdir = case dir
+             when :left  then :up
+             when :up    then :right
+             when :right then :down
+             when :down  then :left
+             end
+    Piece.new(tetromino, x, y, newdir)
+  end
+
+  def move(dir)
+    case dir
+    when :right then Piece.new(tetromino, x + 1, y,     @dir)
+    when :left  then Piece.new(tetromino, x - 1, y,     @dir)
+    when :down  then Piece.new(tetromino, x,     y + 1, @dir)
+    end
+  end
+
+  #----------------------------------------------------------------------------
+
+  def each_occupied_block           # a bit complex, for more details see - http://codeincomplete.com/posts/2011/10/10/javascript_tetris/
+    bit = 0b1000000000000000
+    row = 0
+    col = 0
+    blocks = tetromino[:blocks][dir]
+    until bit.zero?
+      if (blocks & bit) == bit
+        yield x+col, y+row
+      end
+      col = col + 1
+      if col == 4
+        col = 0
+        row = row + 1
+      end
+      bit = bit >> 1
+    end
+  end
+
+end # class Piece
+
+#==================================================================================================
+# The SHOES application
+#==================================================================================================
+
+Shoes.app :title => 'Tetris', :width => WIDTH, :height => HEIGHT do
 
   game = Tetris.new
 
@@ -271,17 +301,20 @@ shoes = Shoes.app :title => 'Tetris', :width => WIDTH, :height => HEIGHT do
     end
 
     game.current.each_occupied_block do |x,y|
-      block(x, y, game.current.type[:color])
+      block(x, y, game.current.tetromino[:color])
     end
-    last = now
 
     if game.lost?
       banner "Game Over", :align => 'center', :stroke => black
       animate.stop
     else
-      subtitle "Score: #{format("%6.6d", game.vscore)}", :stroke => green, :align => 'right'
+      subtitle "Score: #{format("%6.6d", game.score)}", :stroke => green, :align => 'right'
     end
 
+    last = now
   end
 
 end
+
+#==================================================================================================
+
