@@ -73,7 +73,7 @@ class Tetris
     @dt      = 0
     @score   = 0
     @pace    = PACE[:start]
-    @blocks  = Array.new(NX) { Array.new(NY) }   # akward way to initialize an already sized 2 dimensional array
+    @blocks  = Array.new(NX) { Array.new(NY) }   # awkward way to initialize an already sized 2 dimensional array
     @actions = []
     @bag     = new_bag
     @current = random_piece
@@ -171,7 +171,7 @@ class Tetris
   end
 
   def lost?
-    !!@lost
+    @lost
   end
 
   def new_bag
