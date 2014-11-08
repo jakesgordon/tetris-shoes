@@ -1,5 +1,18 @@
 require 'shoes'
 
+#
+# A Tetris game for Ruby Shoes
+#
+# Controls:
+#
+#  left/right - slide the piece horizontally
+#  up - rotate the piece 90 degrees clockwise
+#  down - drop the piece faster
+#  esc - quit the game
+# 
+# For more details see http://codeincomplete.com/posts/2014/11/7/tetris_shoes/
+#
+
 #==================================================================================================
 # Game Constants
 #==================================================================================================
